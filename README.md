@@ -1,319 +1,316 @@
-# Alexa Leaving Timer Skill - Claude Code Specification
+# Alexa Leaving Timer Skill
 
-## Overview
+An Alexa skill that helps families prepare to leave the house on time by creating timers with progressive reminder intervals. Using the Alexa Reminders API, this skill sends native notifications at strategically calculated intervals to help you stay on track.
 
-Build an Alexa skill that creates timers with progressive reminder intervals, designed to help families prepare to leave the house. Uses Alexa Reminders API for native notifications.
+## Features
+
+- **Progressive Reminders**: Automatic reminders at hourly boundaries (for long timers) plus standard intervals (45, 30, 15, 10, 5, 3, 2, 1 minute, and 30 seconds)
+- **Timezone-Aware**: Reminders are scheduled according to your device's timezone
+- **Persistent Storage**: Timer state is maintained across skill sessions using DynamoDB
+- **Smart Cleanup**: Expired timers are automatically cleaned up using DynamoDB TTL
+- **Natural Language**: Supports multiple natural utterances for each command
+- **Permission Handling**: Gracefully requests reminder permissions when needed
+
+## Example Usage
+
+```
+User: "Alexa, ask Leaving Timer Helper to set a timer for 30 minutes"
+Alexa: "Timer set for 30 minutes. I'll remind you at 7 intervals, starting at 30 minutes."
+
+User: "Alexa, ask Leaving Timer Helper how much time do we have"
+Alexa: "You have 22 minutes and 15 seconds until you need to leave."
+
+User: "Alexa, ask Leaving Timer Helper to cancel my timer"
+Alexa: "I've cancelled your leaving timer and all reminders."
+```
 
 ## Project Structure
 
 ```
 leaving-timer-skill/
-├── lambda/
-│   ├── lambda_function.py          # Main Lambda handler
+├── lambda/                         # Lambda function code
+│   ├── lambda_function.py          # Main handler with intent handlers
 │   ├── reminder_calculator.py      # Interval calculation logic
 │   ├── timer_storage.py            # DynamoDB operations
 │   ├── requirements.txt            # Python dependencies
-│   └── tests/
+│   └── tests/                      # Unit tests
 │       ├── test_reminder_calculator.py
 │       └── test_timer_storage.py
-├── skill-package/
+├── skill-package/                  # Alexa skill configuration
 │   ├── skill.json                  # Skill manifest
 │   └── interactionModels/
 │       └── custom/
 │           └── en-GB.json          # UK English interaction model
-├── infrastructure/
-│   └── template.yaml               # AWS SAM/CloudFormation
-└── README.md
+├── infrastructure/                 # AWS infrastructure
+│   └── template.yaml               # AWS SAM template
+└── prompt.md                       # Original specification
 ```
 
-## Requirements
+## Prerequisites
 
-### Dependencies (requirements.txt)
+- AWS Account
+- Python 3.11 or higher
+- AWS SAM CLI (for deployment)
+- Alexa Developer Account
+- ASK CLI (optional, for skill deployment)
 
-```
-ask-sdk-core==1.19.0
-ask-sdk-dynamodb-persistence-adapter==1.19.0
-boto3==1.28.0
-python-dateutil==2.8.2
-```
+## Installation
 
-### AWS Resources
+### 1. Clone the Repository
 
-- Lambda function (Python 3.11 runtime)
-- DynamoDB table: `LeavingTimerData`
-  - Partition key: `userId` (String)
-  - TTL attribute: `expiresAt` (Number)
-- IAM role with permissions:
-  - DynamoDB read/write
-  - CloudWatch Logs
-  - Alexa reminder management (handled by skill permissions)
-
-## Functional Specification
-
-### 1. Reminder Interval Logic
-
-**Function**: `calculate_reminder_intervals(total_minutes: int) -> List[float]`
-
-Rules:
-
-- For timers ≥ 60 minutes: Add reminders at each hour boundary and 30-minute mark
-- Always include (if within timer duration): 45, 30, 15, 10, 5, 3, 2, 1 minute, 30 seconds
-- Return as minutes before end (30 seconds = 0.5)
-- Sort descending (furthest first)
-- Remove duplicates
-
-Examples:
-
-- 20 min timer → [15, 10, 5, 3, 2, 1, 0.5]
-- 90 min timer → [90, 60, 45, 30, 15, 10, 5, 3, 2, 1, 0.5]
-- 150 min timer → [150, 120, 90, 60, 45, 30, 15, 10, 5, 3, 2, 1, 0.5]
-
-### 2. Voice Interaction Design
-
-#### Intents
-
-**SetLeavingTimerIntent**
-
-- Utterances:
-  - “set a leaving timer for {duration}”
-  - “we need to leave in {duration}”
-  - “remind me to leave in {duration}”
-  - “set a {duration} leaving timer”
-- Slot: `duration` (AMAZON.DURATION)
-- Permissions required: `alexa::alerts:reminders:skill:readwrite`
-
-**CheckTimerIntent**
-
-- Utterances:
-  - “how much time until we leave”
-  - “check my leaving timer”
-  - “how long do we have”
-- No slots
-
-**CancelTimerIntent**
-
-- Utterances:
-  - “cancel my leaving timer”
-  - “stop the leaving timer”
-  - “delete my timer”
-- No slots
-
-**AMAZON.HelpIntent** (built-in)
-**AMAZON.CancelIntent** (built-in)
-**AMAZON.StopIntent** (built-in)
-
-### 3. Data Model
-
-**DynamoDB Schema**
-
-```python
-{
-    'userId': 'amzn1.ask.account.XXX',  # Partition key
-    'timerId': 'uuid-string',
-    'startTime': '2024-01-15T14:30:00Z',  # ISO 8601
-    'endTime': '2024-01-15T16:30:00Z',
-    'durationMinutes': 120,
-    'reminderIds': [
-        'alexa-reminder-id-1',
-        'alexa-reminder-id-2',
-        # ... one per interval
-    ],
-    'expiresAt': 1705334400  # Unix timestamp for TTL (1 hour after endTime)
-}
+```bash
+git clone <repository-url>
+cd expert-octo-enigma
 ```
 
-### 4. Core Behaviors
+### 2. Install Dependencies Locally (for testing)
 
-#### Setting a Timer
-
-1. Parse duration from slot (handle PT2H, PT90M formats)
-1. Check for existing active timer:
-
-- If exists: Ask “You already have a timer. Replace it?”
-- Use dialog elicitation
-
-1. Calculate reminder intervals
-1. Get user timezone from device settings
-1. Create Alexa reminders for each interval:
-
-- Spoken text: “{X} minutes until you need to leave”
-- For 30 seconds: “30 seconds until you need to leave”
-- For final reminder (0 mins): “It’s time to leave now”
-
-1. Store timer data in DynamoDB
-1. Respond: “Timer set for {duration}. I’ll remind you at {count} intervals, starting at {first_interval}.”
-
-#### Checking a Timer
-
-1. Retrieve active timer from DynamoDB
-1. Calculate remaining time
-1. If no timer: “You don’t have an active leaving timer”
-1. If expired: Clean up and respond “Your timer has finished”
-1. Respond: “You have {X} minutes and {Y} seconds until you need to leave”
-
-#### Canceling a Timer
-
-1. Retrieve timer from DynamoDB
-1. Delete all associated reminders via Alexa API
-1. Delete timer record from DynamoDB
-1. Respond: “I’ve cancelled your leaving timer and all reminders”
-
-#### Permission Handling
-
-- If reminder permission not granted:
-  - Send permission request card to Alexa app
-  - Respond: “I need permission to set reminders. I’ve sent a card to your Alexa app. Please enable reminders and try again.”
-
-### 5. Error Handling
-
-**Scenarios to handle:**
-
-- Permission denied → Send permission card, friendly message
-- Invalid duration (negative, zero, > 24 hours) → “Please specify a duration between 1 minute and 24 hours”
-- DynamoDB errors → Log error, respond “Sorry, I’m having trouble accessing your timers right now”
-- Reminder creation fails (hit 100 reminder limit) → “You have too many reminders. Please delete some from your Alexa app”
-- Timer already exists → Confirm before overwriting
-- Network timeout → Graceful degradation with retry suggestion
-
-### 6. Implementation Requirements
-
-#### Lambda Handler Structure
-
-```python
-def lambda_handler(event, context):
-    # Initialize skill builder with DynamoDB persistence
-    # Register request handlers in priority order:
-    # 1. LaunchRequestHandler
-    # 2. SetLeavingTimerIntentHandler
-    # 3. CheckTimerIntentHandler
-    # 4. CancelTimerIntentHandler
-    # 5. HelpIntentHandler
-    # 6. CancelAndStopIntentHandler
-    # 7. SessionEndedRequestHandler
-    # 8. IntentReflectorHandler (catchall)
-    # 9. ErrorHandler
-    pass
+```bash
+cd lambda
+pip install -r requirements.txt
 ```
 
-#### Helper Functions Needed
+### 3. Run Unit Tests
 
-**Duration Parsing**
-
-```python
-def parse_duration_to_minutes(duration_str: str) -> int:
-    """Convert ISO 8601 duration (PT2H30M) to total minutes"""
-    pass
+```bash
+cd lambda
+python -m pytest tests/
 ```
 
-**Timezone Handling**
+## Deployment
 
-```python
-def get_user_timezone(handler_input) -> str:
-    """Fetch timezone from device settings API"""
-    pass
+### Deploy AWS Infrastructure
+
+1. **Configure AWS Credentials**
+
+```bash
+aws configure
 ```
 
-**Friendly Duration Formatting**
+2. **Deploy using AWS SAM**
 
-```python
-def format_duration_friendly(minutes: int) -> str:
-    """Convert 150 -> '2 hours and 30 minutes'"""
-    pass
+```bash
+cd infrastructure
+sam build
+sam deploy --guided
 ```
 
-**Reminder Text Generation**
+During the guided deployment:
+- Stack Name: `leaving-timer-skill`
+- AWS Region: `eu-west-2` (or your preferred region)
+- Parameter SkillId: Leave empty initially (update after skill creation)
+- Confirm changes before deploy: `Y`
+- Allow SAM CLI IAM role creation: `Y`
+- Save arguments to configuration file: `Y`
 
-```python
-def generate_reminder_text(minutes_before_end: float) -> str:
-    """Generate spoken text for reminder based on interval"""
-    pass
+3. **Note the Lambda ARN** from the outputs - you'll need this for the Alexa skill configuration.
+
+### Deploy Alexa Skill
+
+#### Option 1: Using Alexa Developer Console
+
+1. Go to [Alexa Developer Console](https://developer.amazon.com/alexa/console/ask)
+2. Click "Create Skill"
+3. Skill name: "Leaving Timer Helper"
+4. Primary locale: English (GB)
+5. Choose "Custom" model and "Provision your own" backend
+6. Create the skill
+
+**Configure the Interaction Model:**
+1. Go to "Build" tab → "JSON Editor"
+2. Copy contents from `skill-package/interactionModels/custom/en-GB.json`
+3. Paste and Save Model
+4. Click "Build Model"
+
+**Configure the Endpoint:**
+1. Go to "Build" tab → "Endpoint"
+2. Select "AWS Lambda ARN"
+3. Paste your Lambda function ARN
+4. Click "Save Endpoints"
+
+**Configure Permissions:**
+1. Go to "Build" tab → "Permissions"
+2. Enable "Reminders" (alexa::alerts:reminders:skill:readwrite)
+
+#### Option 2: Using ASK CLI
+
+```bash
+cd skill-package
+ask deploy
 ```
 
-### 7. Testing Requirements
+### Update Lambda with Skill ID
 
-**Unit Tests**
+After creating the skill, update your SAM deployment with the skill ID:
 
-- `test_reminder_calculator.py`: Test interval calculation for edge cases (1 min, 30 min, 2 hours, 5 hours)
-- `test_timer_storage.py`: Mock DynamoDB operations
+```bash
+cd infrastructure
+sam deploy --parameter-overrides SkillId=amzn1.ask.skill.YOUR-SKILL-ID
+```
 
-**Integration Tests**
+## Configuration
 
-- Test full flow with mocked Alexa SDK
-- Test permission denial scenario
-- Test timer replacement flow
+### Environment Variables
 
-**Manual Testing Checklist**
+The Lambda function uses these environment variables (automatically set by SAM template):
 
-- [ ] Set 30-minute timer, verify 7 reminders created
+- `DYNAMODB_TABLE_NAME`: Name of the DynamoDB table (default: `LeavingTimerData`)
+- `LOG_LEVEL`: Logging level (default: `INFO`, use `DEBUG` for troubleshooting)
+
+### DynamoDB Table
+
+The skill uses a DynamoDB table with:
+- **Partition Key**: `userId` (String)
+- **TTL Attribute**: `expiresAt` (Number) - automatically deletes expired timers
+- **Billing Mode**: Pay-per-request (scales automatically)
+
+## How It Works
+
+### Reminder Interval Calculation
+
+The skill calculates reminder intervals based on the total duration:
+
+- **For timers ≥ 60 minutes**: Adds reminders at each hour boundary and 30-minute mark
+- **Always includes** (if within duration): 45, 30, 15, 10, 5, 3, 2, 1 minute, and 30 seconds
+- **Examples**:
+  - 20 min timer → 7 reminders at: 15, 10, 5, 3, 2, 1 min, 30 sec
+  - 90 min timer → 11 reminders at: 90, 60, 45, 30, 15, 10, 5, 3, 2, 1 min, 30 sec
+  - 150 min timer → 13 reminders at: 150, 120, 90, 60, 45, 30, 15, 10, 5, 3, 2, 1 min, 30 sec
+
+### Timer Lifecycle
+
+1. **Create**: User sets a timer with a duration
+   - Calculate reminder intervals
+   - Create Alexa reminders for each interval
+   - Store timer data in DynamoDB with TTL
+
+2. **Check**: User asks for remaining time
+   - Retrieve timer from DynamoDB
+   - Calculate time remaining
+   - Return formatted response
+
+3. **Cancel**: User cancels the timer
+   - Retrieve timer from DynamoDB
+   - Delete all Alexa reminders
+   - Remove timer from DynamoDB
+
+4. **Expire**: Timer completes
+   - DynamoDB TTL automatically removes record (within 48 hours)
+   - Reminders fire at scheduled times
+
+## Testing
+
+### Unit Tests
+
+Run the test suite:
+
+```bash
+cd lambda
+python -m pytest tests/ -v
+```
+
+Test coverage includes:
+- Interval calculation for various durations
+- Duration parsing (ISO 8601 format)
+- Duration formatting for speech
+- Reminder text generation
+- DynamoDB operations (with mocks)
+
+### Manual Testing Checklist
+
+- [ ] Set 30-minute timer, verify reminders created
 - [ ] Set 2-hour timer, verify hourly + standard reminders
-- [ ] Cancel timer mid-duration, verify reminders deleted
-- [ ] Try setting timer without permission, verify card sent
-- [ ] Check timer status at various points
+- [ ] Check timer status mid-duration
+- [ ] Cancel timer, verify reminders deleted
+- [ ] Try setting timer without permission
 - [ ] Set timer, then try to set another (replacement flow)
+- [ ] Wait for timer to expire naturally
 
-### 8. Deployment
+### Testing with Alexa
 
-**Environment Variables**
+1. **Enable Testing** in Alexa Developer Console (Test tab)
+2. Use the Alexa Simulator or say commands to your device
+3. Check CloudWatch Logs for debugging: `/aws/lambda/leaving-timer-skill-LeavingTimerFunction-XXX`
 
-- `DYNAMODB_TABLE_NAME`: Name of DynamoDB table
-- `LOG_LEVEL`: INFO (production) or DEBUG
+## Troubleshooting
 
-**SAM Template Requirements**
+### Permission Errors
 
-- Lambda timeout: 10 seconds
-- Memory: 256 MB
-- Environment: Python 3.11
-- Trigger: Alexa Skills Kit
-- DynamoDB table with TTL enabled on `expiresAt`
+If users can't set reminders:
+- Ensure the skill manifest includes reminder permissions
+- Check that permission card is sent to Alexa app
+- User must grant permission in the Alexa app
 
-### 9. Skill Manifest (skill.json)
+### Reminders Not Creating
 
-**Key Configuration**
+- Check CloudWatch logs for errors
+- Verify Lambda has correct permissions
+- Ensure timezone is being retrieved correctly
+- Check for 100 reminder limit (Alexa platform limit)
 
-```json
-{
-  "manifest": {
-    "publishingInformation": {
-      "locales": {
-        "en-GB": {
-          "name": "Leaving Timer Helper"
-        }
-      }
-    },
-    "permissions": [
-      {
-        "name": "alexa::alerts:reminders:skill:readwrite"
-      }
-    ],
-    "apis": {
-      "custom": {
-        "endpoint": {
-          "uri": "arn:aws:lambda:eu-west-2:ACCOUNT:function:leaving-timer"
-        }
-      }
-    }
-  }
-}
-```
+### DynamoDB Errors
 
-### 10. Success Criteria
+- Verify Lambda execution role has DynamoDB permissions
+- Check table exists and is in same region
+- Review CloudWatch logs for specific error messages
 
-The implementation should:
+### Timer Not Found
 
-- ✅ Create reminders at correct intervals for various durations
-- ✅ Handle permission flow gracefully
-- ✅ Prevent duplicate timers (with user confirmation)
-- ✅ Clean up reminders on cancellation
-- ✅ Persist timer state across skill invocations
-- ✅ Use correct timezone for reminder scheduling
-- ✅ Handle edge cases (very short/long timers)
-- ✅ Provide clear voice feedback for all actions
-- ✅ Auto-cleanup expired timers via DynamoDB TTL
+- Check if timer expired (verify DynamoDB entry)
+- Ensure user ID is consistent across invocations
+- Check for DynamoDB connectivity issues
 
-## Notes for Implementation
+## Cost Estimation
 
-- Use `ask_sdk_core.utils.request_util` for timezone extraction
-- Reminder API returns reminder IDs - store these for later deletion
-- DynamoDB TTL cleanup happens within 48 hours, not immediately
-- Test with actual Alexa device for reminder notification UX
-- Consider rate limiting (max 1 timer per user to start)
+This skill uses serverless AWS services with pay-per-use pricing:
+
+- **Lambda**: Free tier includes 1M requests/month
+- **DynamoDB**: Free tier includes 25GB storage + 25 RCU/WCU
+- **CloudWatch Logs**: First 5GB per month free
+
+For typical family use (a few timers per day), costs should remain in AWS free tier.
+
+## Limitations
+
+- One active timer per user
+- Maximum timer duration: 24 hours
+- Subject to Alexa's 100 reminder limit per user
+- DynamoDB TTL cleanup happens within 48 hours (not immediate)
+- UK English only (can be extended to other locales)
+
+## Future Enhancements
+
+Potential improvements:
+- [ ] Multiple simultaneous timers per user
+- [ ] Named timers ("morning timer", "school timer")
+- [ ] Custom interval configurations
+- [ ] Additional locales (en-US, en-CA, etc.)
+- [ ] Recurring/scheduled timers
+- [ ] Integration with calendar events
+- [ ] Voice customization for reminder messages
+
+## Contributing
+
+Contributions are welcome! Please ensure:
+- Unit tests pass
+- New features include tests
+- Code follows existing style
+- Update documentation
+
+## License
+
+This project is provided as-is for educational and personal use.
+
+## Support
+
+For issues or questions:
+- Check CloudWatch Logs for errors
+- Review the [Alexa Skills Kit Documentation](https://developer.amazon.com/docs/ask-overviews/build-skills-with-the-alexa-skills-kit.html)
+- See `prompt.md` for detailed implementation specification
+
+## Acknowledgments
+
+Built with:
+- [Alexa Skills Kit SDK for Python](https://github.com/alexa/alexa-skills-kit-sdk-for-python)
+- [AWS SAM](https://aws.amazon.com/serverless/sam/)
+- [Alexa Reminders API](https://developer.amazon.com/docs/smapi/alexa-reminders-api-reference.html)
