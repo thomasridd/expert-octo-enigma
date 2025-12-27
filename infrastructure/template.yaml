@@ -1,0 +1,93 @@
+AWSTemplateFormationVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Alexa Leaving Timer Skill
+
+  Creates timers with progressive reminder intervals to help families prepare to leave
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 256
+    Runtime: python3.11
+    Architectures:
+      - x86_64
+
+Parameters:
+  SkillId:
+    Type: String
+    Description: Alexa Skill ID (amzn1.ask.skill.xxx)
+    Default: ''
+
+Resources:
+  LeavingTimerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../lambda/
+      Handler: lambda_function.lambda_handler
+      Description: Lambda function for Alexa Leaving Timer Skill
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref LeavingTimerTable
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LeavingTimerTable
+        - Statement:
+          - Sid: CloudWatchLogsPolicy
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+      Events:
+        AlexaSkillEvent:
+          Type: AlexaSkill
+          Properties:
+            SkillId: !Ref SkillId
+
+  LeavingTimerTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: LeavingTimerData
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: LeavingTimerSkill
+        - Key: Purpose
+          Value: TimerStorage
+
+  LeavingTimerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${LeavingTimerFunction}'
+      RetentionInDays: 30
+
+Outputs:
+  LeavingTimerFunctionArn:
+    Description: ARN of the Leaving Timer Lambda Function
+    Value: !GetAtt LeavingTimerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionArn'
+
+  LeavingTimerTableName:
+    Description: Name of the DynamoDB table
+    Value: !Ref LeavingTimerTable
+    Export:
+      Name: !Sub '${AWS::StackName}-TableName'
+
+  LeavingTimerTableArn:
+    Description: ARN of the DynamoDB table
+    Value: !GetAtt LeavingTimerTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-TableArn'

@@ -1,0 +1,77 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "leaving timer helper",
+      "intents": [
+        {
+          "name": "SetLeavingTimerIntent",
+          "slots": [
+            {
+              "name": "duration",
+              "type": "AMAZON.DURATION"
+            }
+          ],
+          "samples": [
+            "set a leaving timer for {duration}",
+            "we need to leave in {duration}",
+            "remind me to leave in {duration}",
+            "set a {duration} leaving timer",
+            "create a timer for {duration}",
+            "start a leaving timer for {duration}",
+            "set timer for {duration}",
+            "we're leaving in {duration}",
+            "leaving in {duration}",
+            "help me leave in {duration}"
+          ]
+        },
+        {
+          "name": "CheckTimerIntent",
+          "slots": [],
+          "samples": [
+            "how much time until we leave",
+            "check my leaving timer",
+            "how long do we have",
+            "how much time do we have",
+            "check my timer",
+            "how long until we leave",
+            "when do we need to leave",
+            "what's the timer",
+            "time remaining",
+            "check the timer"
+          ]
+        },
+        {
+          "name": "CancelTimerIntent",
+          "slots": [],
+          "samples": [
+            "cancel my leaving timer",
+            "stop the leaving timer",
+            "delete my timer",
+            "cancel the timer",
+            "remove my timer",
+            "clear my timer",
+            "delete the leaving timer",
+            "cancel timer"
+          ]
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        }
+      ],
+      "types": []
+    }
+  }
+}
