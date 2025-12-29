@@ -28,6 +28,10 @@ Alexa: "I've cancelled your leaving timer and all reminders."
 
 ```
 leaving-timer-skill/
+├── .github/                        # GitHub Actions workflows
+│   └── workflows/
+│       ├── test.yml                # CI: Run tests on PR/push
+│       └── deploy.yml              # CD: Deploy to AWS
 ├── lambda/                         # Lambda function code
 │   ├── lambda_function.py          # Main handler with intent handlers
 │   ├── reminder_calculator.py      # Interval calculation logic
@@ -43,6 +47,10 @@ leaving-timer-skill/
 │           └── en-GB.json          # UK English interaction model
 ├── infrastructure/                 # AWS infrastructure
 │   └── template.yaml               # AWS SAM template
+├── docs/                           # Documentation
+│   └── cicd/
+│       ├── SETUP.md                # CI/CD setup guide
+│       └── iam-policy.json         # IAM policy for deployments
 └── prompt.md                       # Original specification
 ```
 
@@ -147,6 +155,48 @@ After creating the skill, update your SAM deployment with the skill ID:
 cd infrastructure
 sam deploy --parameter-overrides SkillId=amzn1.ask.skill.YOUR-SKILL-ID
 ```
+
+## CI/CD Pipeline
+
+This project includes automated CI/CD pipelines using GitHub Actions.
+
+### Automated Workflows
+
+**Test Workflow** (runs on every PR and push to main):
+- Runs unit tests with pytest on Python 3.11 and 3.12
+- Validates SAM template
+- Validates Alexa skill configuration
+- Runs linting with flake8
+- Uploads code coverage reports
+
+**Deploy Workflow** (runs on push to main or manual trigger):
+- Deploys AWS infrastructure using SAM
+- Supports multiple environments (dev, staging, prod)
+- Runs smoke tests after deployment
+- Optionally deploys Alexa skill configuration
+
+### Quick Setup
+
+1. **Create AWS IAM User** with deployment permissions
+2. **Add GitHub Secrets**:
+   - `AWS_ACCESS_KEY_ID`
+   - `AWS_SECRET_ACCESS_KEY`
+   - `ALEXA_SKILL_ID`
+3. **Push to main** or create a PR to trigger workflows
+
+### Full Setup Guide
+
+For complete step-by-step instructions including:
+- Creating AWS IAM user with proper permissions
+- Configuring GitHub secrets and environments
+- Setting up ASK CLI tokens
+- Troubleshooting common issues
+
+See: **[docs/cicd/SETUP.md](docs/cicd/SETUP.md)**
+
+### Manual Deployment
+
+If you prefer manual deployment over CI/CD, follow the instructions in the [Deployment](#deployment) section below.
 
 ## Configuration
 
