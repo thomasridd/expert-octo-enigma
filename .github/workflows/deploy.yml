@@ -1,0 +1,147 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'lambda/**'
+      - 'infrastructure/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  AWS_REGION: eu-west-2
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Install AWS SAM CLI
+      run: |
+        pip install aws-sam-cli
+
+    - name: Build SAM application
+      run: |
+        cd infrastructure
+        sam build
+
+    - name: Deploy to AWS
+      run: |
+        cd infrastructure
+        sam deploy \
+          --no-confirm-changeset \
+          --no-fail-on-empty-changeset \
+          --stack-name leaving-timer-skill-${{ github.event.inputs.environment || 'dev' }} \
+          --s3-prefix leaving-timer-skill-${{ github.event.inputs.environment || 'dev' }} \
+          --capabilities CAPABILITY_IAM \
+          --region ${{ env.AWS_REGION }} \
+          --parameter-overrides \
+            ParameterKey=SkillId,ParameterValue=${{ secrets.ALEXA_SKILL_ID }}
+
+    - name: Get Stack Outputs
+      id: stack-outputs
+      run: |
+        FUNCTION_ARN=$(aws cloudformation describe-stacks \
+          --stack-name leaving-timer-skill-${{ github.event.inputs.environment || 'dev' }} \
+          --query 'Stacks[0].Outputs[?OutputKey==`LeavingTimerFunctionArn`].OutputValue' \
+          --output text \
+          --region ${{ env.AWS_REGION }})
+        echo "function-arn=$FUNCTION_ARN" >> $GITHUB_OUTPUT
+        echo "Lambda Function ARN: $FUNCTION_ARN"
+
+    - name: Run smoke tests
+      run: |
+        echo "Running smoke tests against deployed Lambda..."
+        aws lambda get-function \
+          --function-name ${{ steps.stack-outputs.outputs.function-arn }} \
+          --region ${{ env.AWS_REGION }}
+
+    - name: Deployment Summary
+      run: |
+        echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: ${{ github.event.inputs.environment || 'dev' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Region**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Lambda ARN**: ${{ steps.stack-outputs.outputs.function-arn }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
+
+  deploy-skill:
+    runs-on: ubuntu-latest
+    needs: deploy-infrastructure
+    if: github.event.inputs.environment == 'prod' || github.ref == 'refs/heads/main'
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install ASK CLI
+      run: |
+        npm install -g ask-cli
+
+    - name: Configure ASK CLI
+      run: |
+        mkdir -p ~/.ask
+        echo '{
+          "profiles": {
+            "default": {
+              "aws_profile": "default",
+              "token": {
+                "access_token": "${{ secrets.ASK_ACCESS_TOKEN }}",
+                "refresh_token": "${{ secrets.ASK_REFRESH_TOKEN }}",
+                "token_type": "bearer",
+                "expires_in": 3600,
+                "expires_at": "2099-12-31T23:59:59.000Z"
+              },
+              "vendor_id": "${{ secrets.ASK_VENDOR_ID }}"
+            }
+          }
+        }' > ~/.ask/cli_config
+
+    - name: Deploy Alexa Skill
+      run: |
+        cd skill-package
+        ask deploy --skip-wait-for-build
+      continue-on-error: true
+
+    - name: Skill Deployment Summary
+      run: |
+        echo "## Skill Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Alexa skill deployment initiated." >> $GITHUB_STEP_SUMMARY
+        echo "Check Alexa Developer Console for build status." >> $GITHUB_STEP_SUMMARY

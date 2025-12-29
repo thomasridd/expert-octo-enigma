@@ -1,0 +1,97 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'lambda/**'
+      - '.github/workflows/test.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'lambda/**'
+      - '.github/workflows/test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        cache-dependency-path: lambda/requirements.txt
+
+    - name: Install dependencies
+      run: |
+        cd lambda
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-mock
+
+    - name: Run unit tests
+      run: |
+        cd lambda
+        python -m pytest tests/ -v --cov=. --cov-report=term --cov-report=xml
+
+    - name: Upload coverage reports
+      if: matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./lambda/coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Lint with flake8
+      run: |
+        pip install flake8
+        cd lambda
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=tests
+        # Exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --exclude=tests
+
+  validate-sam-template:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install AWS SAM CLI
+      run: |
+        pip install aws-sam-cli
+
+    - name: Validate SAM template
+      run: |
+        cd infrastructure
+        sam validate --lint
+
+  validate-skill-package:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Validate skill.json
+      run: |
+        python -m json.tool skill-package/skill.json > /dev/null
+
+    - name: Validate interaction model
+      run: |
+        python -m json.tool skill-package/interactionModels/custom/en-GB.json > /dev/null
